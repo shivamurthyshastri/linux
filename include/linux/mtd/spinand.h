@@ -418,4 +418,7 @@ int spinand_match_and_init(struct spinand_device *dev,
 int spinand_upd_cfg(struct spinand_device *spinand, u8 mask, u8 val);
 int spinand_select_target(struct spinand_device *spinand, unsigned int target);
 
+int spinand_parameter_page_read(struct spinand_device *spinand,
+				u8 page, void *parameters, u32 len);
+
 #endif /* __LINUX_MTD_SPINAND_H */
