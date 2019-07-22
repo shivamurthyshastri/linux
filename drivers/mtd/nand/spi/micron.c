@@ -90,6 +90,19 @@ static int micron_ecc_get_status(struct spinand_device *spinand,
 	return -EINVAL;
 }
 
+static int micron_select_target(struct spinand_device *spinand,
+				unsigned int target)
+{
+	struct spi_mem_op op = SPINAND_SET_FEATURE_OP(0xd0,
+						      spinand->scratchbuf);
+
+	if (target == 1)
+		target = 0x40;
+
+	*spinand->scratchbuf = target;
+	return spi_mem_exec_op(spinand->spimem, &op);
+}
+
 static int micron_spinand_detect(struct spinand_device *spinand)
 {
 	const struct spi_mem_op *op;
@@ -105,6 +118,7 @@ static int micron_spinand_detect(struct spinand_device *spinand)
 	spinand->flags = 0;
 	spinand->eccinfo.get_status = micron_ecc_get_status;
 	spinand->eccinfo.ooblayout = &micron_ooblayout_ops;
+	spinand->select_target = micron_select_target;
 
 	op = spinand_select_op_variant(spinand,
 				       &read_cache_variants);
