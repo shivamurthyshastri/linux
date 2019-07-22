@@ -90,22 +90,10 @@ static int micron_ecc_get_status(struct spinand_device *spinand,
 	return -EINVAL;
 }
 
-static const struct spinand_info micron_spinand_table[] = {
-	SPINAND_INFO("MT29F2G01ABAGD", 0x24,
-		     NAND_MEMORG(1, 2048, 128, 64, 2048, 40, 2, 1, 1),
-		     NAND_ECCREQ(8, 512),
-		     SPINAND_INFO_OP_VARIANTS(&read_cache_variants,
-					      &write_cache_variants,
-					      &update_cache_variants),
-		     0,
-		     SPINAND_ECCINFO(&micron_ooblayout_ops,
-				     micron_ecc_get_status)),
-};
-
 static int micron_spinand_detect(struct spinand_device *spinand)
 {
+	const struct spi_mem_op *op;
 	u8 *id = spinand->id.data;
-	int ret;
 
 	/*
 	 * Micron SPI NAND read ID need a dummy byte,
@@ -114,16 +102,55 @@ static int micron_spinand_detect(struct spinand_device *spinand)
 	if (id[1] != SPINAND_MFR_MICRON)
 		return 0;
 
-	ret = spinand_match_and_init(spinand, micron_spinand_table,
-				     ARRAY_SIZE(micron_spinand_table), id[2]);
-	if (ret)
-		return ret;
+	spinand->flags = 0;
+	spinand->eccinfo.get_status = micron_ecc_get_status;
+	spinand->eccinfo.ooblayout = &micron_ooblayout_ops;
+
+	op = spinand_select_op_variant(spinand,
+				       &read_cache_variants);
+	if (!op)
+		return -ENOTSUPP;
+
+	spinand->op_templates.read_cache = op;
+
+	op = spinand_select_op_variant(spinand,
+				       &write_cache_variants);
+	if (!op)
+		return -ENOTSUPP;
+
+	spinand->op_templates.write_cache = op;
+
+	op = spinand_select_op_variant(spinand,
+				       &update_cache_variants);
+	spinand->op_templates.update_cache = op;
 
 	return 1;
 }
 
+static void micron_fixup_param_page(struct spinand_device *spinand,
+				    struct nand_onfi_params *p)
+{
+	/*
+	 * As per Micron datasheets vendor[83] is defined as
+	 * die_select_feature
+	 */
+	if (p->vendor[83] && !p->interleaved_bits)
+		spinand->base.memorg.planes_per_lun = 1 << p->vendor[0];
+
+	spinand->base.memorg.ntargets = p->lun_count;
+	spinand->base.memorg.luns_per_target = 1;
+
+	/*
+	 * As per Micron datasheets,
+	 * vendor[82] is ECC maximum correctability
+	 */
+	spinand->base.eccreq.strength = p->vendor[82];
+	spinand->base.eccreq.step_size = 512;
+}
+
 static const struct spinand_manufacturer_ops micron_spinand_manuf_ops = {
 	.detect = micron_spinand_detect,
+	.fixup_param_page = micron_fixup_param_page,
 };
 
 const struct spinand_manufacturer micron_spinand_manufacturer = {
