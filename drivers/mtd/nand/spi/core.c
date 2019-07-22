@@ -400,6 +400,131 @@ static int spinand_lock_block(struct spinand_device *spinand, u8 lock)
 	return spinand_write_reg_op(spinand, REG_BLOCK_LOCK, lock);
 }
 
+/**
+ * spinand_read_param_page_op - Read parameter page operation
+ * @spinand: the spinand
+ * @page: page number where parameter page tables can be found
+ * @buf: buffer used to store the parameter page
+ * @len: length of the buffer
+ *
+ * Read parameter page
+ *
+ * Returns 0 on success, a negative error code otherwise.
+ */
+static int spinand_parameter_page_read(struct spinand_device *spinand,
+				       u8 page, void *buf, unsigned int len)
+{
+	struct spi_mem_op pread_op = SPINAND_PAGE_READ_OP(page);
+	struct spi_mem_op pread_cache_op =
+				SPINAND_PAGE_READ_FROM_CACHE_OP(false,
+								0,
+								1,
+								buf,
+								len);
+	u8 feature;
+	u8 status;
+	int ret;
+
+	if (len && !buf)
+		return -EINVAL;
+
+	ret = spinand_read_reg_op(spinand, REG_CFG,
+				  &feature);
+	if (ret)
+		return ret;
+
+	/* CFG_OTP_ENABLE is used to enable parameter page access */
+	feature |= CFG_OTP_ENABLE;
+
+	spinand_write_reg_op(spinand, REG_CFG, feature);
+
+	ret = spi_mem_exec_op(spinand->spimem, &pread_op);
+	if (ret)
+		return ret;
+
+	ret = spinand_wait(spinand, &status);
+	if (ret < 0)
+		return ret;
+
+	ret = spi_mem_exec_op(spinand->spimem, &pread_cache_op);
+	if (ret)
+		return ret;
+
+	ret = spinand_read_reg_op(spinand, REG_CFG,
+				  &feature);
+	if (ret)
+		return ret;
+
+	feature &= ~CFG_OTP_ENABLE;
+
+	spinand_write_reg_op(spinand, REG_CFG, feature);
+
+	return 0;
+}
+
+static int spinand_param_page_detect(struct spinand_device *spinand)
+{
+	struct mtd_info *mtd = spinand_to_mtd(spinand);
+	struct nand_memory_organization *memorg;
+	struct nand_onfi_params *p;
+	struct nand_device *base = spinand_to_nand(spinand);
+	int i, ret;
+
+	memorg = nanddev_get_memorg(base);
+
+	/* Allocate buffer to hold parameter page */
+	p = kzalloc((sizeof(*p) * 3), GFP_KERNEL);
+	if (!p)
+		return -ENOMEM;
+
+	ret = spinand_parameter_page_read(spinand, 0x01, p, sizeof(*p) * 3);
+	if (ret) {
+		ret = 0;
+		goto free_param_page;
+	}
+
+	for (i = 0; i < 3; i++) {
+		if (onfi_crc16(ONFI_CRC_BASE, (u8 *)&p[i], 254) ==
+				le16_to_cpu(p->crc)) {
+			if (i)
+				memcpy(p, &p[i], sizeof(*p));
+			break;
+		}
+	}
+
+	if (i == 3) {
+		const void *srcbufs[3] = {p, p + 1, p + 2};
+
+		pr_warn("Could not find a valid ONFI parameter page, trying bit-wise majority to recover it\n");
+		nand_bit_wise_majority(srcbufs, ARRAY_SIZE(srcbufs), p,
+				       sizeof(*p));
+
+		if (onfi_crc16(ONFI_CRC_BASE, (u8 *)p, 254) !=
+				le16_to_cpu(p->crc)) {
+			pr_err("ONFI parameter recovery failed, aborting\n");
+			goto free_param_page;
+		}
+	}
+
+	parse_onfi_params(memorg, p);
+
+	mtd->writesize = memorg->pagesize;
+	mtd->erasesize = memorg->pages_per_eraseblock * memorg->pagesize;
+	mtd->oobsize = memorg->oobsize;
+
+	/* Manufacturers may interpret the parameter page differently */
+	if (spinand->manufacturer->ops->fixup_param_page)
+		spinand->manufacturer->ops->fixup_param_page(spinand, p);
+
+	/* Identification done, free the full parameter page and exit */
+	ret = 1;
+
+free_param_page:
+	kfree(p);
+
+	return ret;
+}
+
 static int spinand_check_ecc_status(struct spinand_device *spinand, u8 status)
 {
 	struct nand_device *nand = spinand_to_nand(spinand);
@@ -908,6 +1033,15 @@ static int spinand_detect(struct spinand_device *spinand)
 		dev_err(dev, "unknown raw ID %*phN\n", SPINAND_MAX_ID_LEN,
 			spinand->id.data);
 		return ret;
+	}
+
+	if (!spinand->base.memorg.pagesize) {
+		ret = spinand_param_page_detect(spinand);
+		if (ret <= 0) {
+			dev_err(dev, "no parameter page for %*phN\n",
+				SPINAND_MAX_ID_LEN, spinand->id.data);
+			return -ENODEV;
+		}
 	}
 
 	if (nand->memorg.ntargets > 1 && !spinand->select_target) {
