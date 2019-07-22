@@ -127,6 +127,15 @@ static int micron_spinand_detect(struct spinand_device *spinand)
 	return 1;
 }
 
+static int micron_spinand_init(struct spinand_device *spinand)
+{
+	/*
+	 * Some of the Micron flashes enable this BIT by default,
+	 * and there is a chance of read failure due to this.
+	 */
+	return spinand_upd_cfg(spinand, CFG_QUAD_ENABLE, 0);
+}
+
 static void micron_fixup_param_page(struct spinand_device *spinand,
 				    struct nand_onfi_params *p)
 {
@@ -150,6 +159,7 @@ static void micron_fixup_param_page(struct spinand_device *spinand,
 
 static const struct spinand_manufacturer_ops micron_spinand_manuf_ops = {
 	.detect = micron_spinand_detect,
+	.init = micron_spinand_init,
 	.fixup_param_page = micron_fixup_param_page,
 };
 
