@@ -10,6 +10,7 @@
 #ifndef __LINUX_MTD_ONFI_H
 #define __LINUX_MTD_ONFI_H
 
+#include <linux/mtd/nand.h>
 #include <linux/types.h>
 
 /* ONFI version bits */
@@ -174,5 +175,13 @@ struct onfi_params {
 	u16 vendor_revision;
 	u8 vendor[88];
 };
+
+/* ONFI functions */
+u16 onfi_crc16(u16 crc, u8 const *p, size_t len);
+void nand_bit_wise_majority(const void **srcbufs,
+			    unsigned int nsrcbufs,
+			    void *dstbuf,
+			    unsigned int bufsize);
+void sanitize_string(u8 *s, size_t len);
 
 #endif /* __LINUX_MTD_ONFI_H */
