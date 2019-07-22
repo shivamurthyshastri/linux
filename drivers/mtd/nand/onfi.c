@@ -87,3 +87,35 @@ void sanitize_string(u8 *s, size_t len)
 	strim(s);
 }
 EXPORT_SYMBOL_GPL(sanitize_string);
+
+/**
+ * fill_nand_memorg() - Parse ONFI table and fill memorg
+ * @memorg: NAND memorg to be filled
+ * @p: ONFI table to be parsed
+ *
+ */
+void parse_onfi_params(struct nand_memory_organization *memorg,
+		       struct nand_onfi_params *p)
+{
+	memorg->pagesize = le32_to_cpu(p->byte_per_page);
+
+	/*
+	 * pages_per_block and blocks_per_lun may not be a power-of-2 size
+	 * (don't ask me who thought of this...). MTD assumes that these
+	 * dimensions will be power-of-2, so just truncate the remaining area.
+	 */
+	memorg->pages_per_eraseblock =
+			1 << (fls(le32_to_cpu(p->pages_per_block)) - 1);
+
+	memorg->oobsize = le16_to_cpu(p->spare_bytes_per_page);
+
+	memorg->luns_per_target = p->lun_count;
+	memorg->planes_per_lun = 1 << p->interleaved_bits;
+
+	/* See erasesize comment */
+	memorg->eraseblocks_per_lun =
+		1 << (fls(le32_to_cpu(p->blocks_per_lun)) - 1);
+	memorg->max_bad_eraseblocks_per_lun = le32_to_cpu(p->blocks_per_lun);
+	memorg->bits_per_cell = p->bits_per_cell;
+}
+EXPORT_SYMBOL_GPL(parse_onfi_params);

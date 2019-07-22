@@ -181,29 +181,11 @@ int nand_onfi_detect(struct nand_chip *chip)
 		goto free_onfi_param_page;
 	}
 
-	memorg->pagesize = le32_to_cpu(p->byte_per_page);
+	parse_onfi_params(memorg, p);
+
 	mtd->writesize = memorg->pagesize;
-
-	/*
-	 * pages_per_block and blocks_per_lun may not be a power-of-2 size
-	 * (don't ask me who thought of this...). MTD assumes that these
-	 * dimensions will be power-of-2, so just truncate the remaining area.
-	 */
-	memorg->pages_per_eraseblock =
-			1 << (fls(le32_to_cpu(p->pages_per_block)) - 1);
 	mtd->erasesize = memorg->pages_per_eraseblock * memorg->pagesize;
-
-	memorg->oobsize = le16_to_cpu(p->spare_bytes_per_page);
 	mtd->oobsize = memorg->oobsize;
-
-	memorg->luns_per_target = p->lun_count;
-	memorg->planes_per_lun = 1 << p->interleaved_bits;
-
-	/* See erasesize comment */
-	memorg->eraseblocks_per_lun =
-		1 << (fls(le32_to_cpu(p->blocks_per_lun)) - 1);
-	memorg->max_bad_eraseblocks_per_lun = le32_to_cpu(p->blocks_per_lun);
-	memorg->bits_per_cell = p->bits_per_cell;
 
 	if (le16_to_cpu(p->features) & ONFI_FEATURE_16_BIT_BUS)
 		chip->options |= NAND_BUSWIDTH_16;

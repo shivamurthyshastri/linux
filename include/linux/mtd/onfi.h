@@ -183,5 +183,7 @@ void nand_bit_wise_majority(const void **srcbufs,
 			    void *dstbuf,
 			    unsigned int bufsize);
 void sanitize_string(u8 *s, size_t len);
+void parse_onfi_params(struct nand_memory_organization *memorg,
+		       struct nand_onfi_params *p);
 
 #endif /* __LINUX_MTD_ONFI_H */
